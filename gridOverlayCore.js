@@ -331,7 +331,7 @@
       cleanupRootObservers();
       const roots = collectOpenShadowRoots();
       for (const root of roots) {
-        const shadowObserver = new MutationObserverRef(onMutation);
+        const shadowObserver = new MutationObserverRef(onRootMutation);
         shadowObserver.observe(root, {
           childList: true,
           subtree: true,
