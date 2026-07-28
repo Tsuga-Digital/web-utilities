@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Web Utilities",
+  "description": "Simple browser dev utilities, including a CSS Grid highlighter.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_title": "Web Utilities",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "web-utilities@tsuga-digital"
+    }
+  }
+}
