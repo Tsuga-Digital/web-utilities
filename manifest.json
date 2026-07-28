@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Web Utilities - Grid Overlay",
+  "version": "0.1.0",
+  "description": "Highlights CSS grid containers with a non-invasive overlay.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "toggle-grid-overlay": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+G",
+        "mac": "Command+Shift+G"
+      },
+      "description": "Toggle CSS grid overlay on the active tab"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "grid-overlay@tsuga.digital",
+      "data_collection_permissions": {
+        "required": [],
+        "optional": []
+      }
+    }
+  }
+}
