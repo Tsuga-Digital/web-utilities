@@ -4,11 +4,12 @@ Browser extension utilities for page inspection.
 
 ## Grid Overlay utility
 
-This extension toggles a non-invasive visual overlay around CSS grid containers.
+This extension toggles a non-invasive visual overlay around CSS grid containers and their resolved row and column tracks.
 
 ### Features
 
 - Non-invasive overlay layer using each grid's `getBoundingClientRect()`
+- Draws resolved column and row edges, including visible gutter gaps
 - On-demand injection (no automatic page-load content script)
 - Keyboard command for automation and accessibility: `Ctrl+Shift+G` (`Command+Shift+G` on macOS)
 - Supports dynamic DOM updates through mutation observers

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Web Utilities - Grid Overlay",
-  "version": "0.1.0",
-  "description": "Highlights CSS grid containers with a non-invasive overlay.",
+  "version": "0.2.0",
+  "description": "Draws CSS grid containers, columns, rows, and gaps with a non-invasive overlay.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {

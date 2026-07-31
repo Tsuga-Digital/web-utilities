@@ -54,6 +54,149 @@
     return grids;
   }
 
+  function parsePixelValue(value) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function parseResolvedTrackSizes(value) {
+    if (!value || value === 'none' || value === 'subgrid') {
+      return [];
+    }
+
+    const tokens = [];
+    let token = '';
+    let bracketDepth = 0;
+    let parenthesisDepth = 0;
+
+    for (const character of value.trim()) {
+      if (character === '[') {
+        bracketDepth += 1;
+      } else if (character === ']') {
+        bracketDepth = Math.max(0, bracketDepth - 1);
+      } else if (character === '(') {
+        parenthesisDepth += 1;
+      } else if (character === ')') {
+        parenthesisDepth = Math.max(0, parenthesisDepth - 1);
+      }
+
+      if (/\s/.test(character) && bracketDepth === 0 && parenthesisDepth === 0) {
+        if (token) {
+          tokens.push(token);
+          token = '';
+        }
+      } else {
+        token += character;
+      }
+    }
+
+    if (token) {
+      tokens.push(token);
+    }
+
+    return tokens
+      .filter((current) => /^-?(?:\d+|\d*\.\d+)px$/i.test(current))
+      .map((current) => Math.max(0, Number.parseFloat(current)));
+  }
+
+  function normalizeAlignment(value) {
+    const parts = String(value || 'start')
+      .trim()
+      .split(/\s+/)
+      .filter((part) => part !== 'safe' && part !== 'unsafe');
+    const alignment = parts.at(-1) || 'start';
+    return alignment === 'normal' || alignment === 'stretch' ? 'start' : alignment;
+  }
+
+  function computeTrackSegments(trackSizes, gap, availableSize, alignment) {
+    if (trackSizes.length === 0) {
+      return [];
+    }
+
+    const normalizedGap = Math.max(0, gap);
+    const tracksSize = trackSizes.reduce((sum, size) => sum + size, 0);
+    const baseGapsSize = normalizedGap * Math.max(0, trackSizes.length - 1);
+    const freeSpace = Math.max(0, availableSize - tracksSize - baseGapsSize);
+    const normalizedAlignment = normalizeAlignment(alignment);
+    let offset = 0;
+    let distributedGap = 0;
+
+    if (normalizedAlignment === 'center') {
+      offset = freeSpace / 2;
+    } else if (normalizedAlignment === 'end' || normalizedAlignment === 'flex-end') {
+      offset = freeSpace;
+    } else if (normalizedAlignment === 'space-between' && trackSizes.length > 1) {
+      distributedGap = freeSpace / (trackSizes.length - 1);
+    } else if (normalizedAlignment === 'space-around') {
+      distributedGap = freeSpace / trackSizes.length;
+      offset = distributedGap / 2;
+    } else if (normalizedAlignment === 'space-evenly') {
+      distributedGap = freeSpace / (trackSizes.length + 1);
+      offset = distributedGap;
+    }
+
+    let position = offset;
+    return trackSizes.map((size) => {
+      const segment = { start: position, end: position + size, size };
+      position = segment.end + normalizedGap + distributedGap;
+      return segment;
+    });
+  }
+
+  function getGridTrackGeometry(element, style, rect) {
+    const borderLeft = parsePixelValue(style.borderLeftWidth);
+    const borderRight = parsePixelValue(style.borderRightWidth);
+    const borderTop = parsePixelValue(style.borderTopWidth);
+    const borderBottom = parsePixelValue(style.borderBottomWidth);
+    const paddingLeft = parsePixelValue(style.paddingLeft);
+    const paddingRight = parsePixelValue(style.paddingRight);
+    const paddingTop = parsePixelValue(style.paddingTop);
+    const paddingBottom = parsePixelValue(style.paddingBottom);
+    const layoutWidth = Number(element.offsetWidth) || rect.width;
+    const layoutHeight = Number(element.offsetHeight) || rect.height;
+    const scaleX = layoutWidth > 0 ? rect.width / layoutWidth : 1;
+    const scaleY = layoutHeight > 0 ? rect.height / layoutHeight : 1;
+    const contentWidth = Math.max(
+      0,
+      (Number(element.clientWidth) || layoutWidth - borderLeft - borderRight) - paddingLeft - paddingRight
+    );
+    const contentHeight = Math.max(
+      0,
+      (Number(element.clientHeight) || layoutHeight - borderTop - borderBottom) - paddingTop - paddingBottom
+    );
+    const columnSizes = parseResolvedTrackSizes(style.gridTemplateColumns);
+    const rowSizes = parseResolvedTrackSizes(style.gridTemplateRows);
+
+    return {
+      content: {
+        left: (borderLeft + paddingLeft) * scaleX,
+        top: (borderTop + paddingTop) * scaleY,
+        width: contentWidth * scaleX,
+        height: contentHeight * scaleY
+      },
+      columns: computeTrackSegments(
+        columnSizes,
+        parsePixelValue(style.columnGap),
+        contentWidth,
+        style.justifyContent
+      ).map((segment) => ({
+        start: segment.start * scaleX,
+        end: segment.end * scaleX,
+        size: segment.size * scaleX
+      })),
+      rows: computeTrackSegments(
+        rowSizes,
+        parsePixelValue(style.rowGap),
+        contentHeight,
+        style.alignContent
+      ).map((segment) => ({
+        start: segment.start * scaleY,
+        end: segment.end * scaleY,
+        size: segment.size * scaleY
+      }))
+    };
+  }
+
   function createOverlayRoot(documentRef) {
     const overlayRoot = documentRef.createElement('div');
     overlayRoot.id = OVERLAY_ROOT_ID;
@@ -97,7 +240,86 @@
     return badge;
   }
 
-  function createGridOutline(documentRef, rect, index) {
+  function createTrackLine(documentRef, axis, position, crossStart, crossSize, edge) {
+    const line = documentRef.createElement('div');
+    line.setAttribute('data-tsuga-grid-overlay', 'true');
+    line.setAttribute('data-tsuga-grid-axis', axis);
+    line.setAttribute('data-tsuga-grid-edge', edge);
+
+    Object.assign(line.style, {
+      position: 'absolute',
+      pointerEvents: 'none',
+      background: 'rgba(234, 88, 12, 0.95)'
+    });
+
+    if (axis === 'column') {
+      Object.assign(line.style, {
+        left: `${position}px`,
+        top: `${crossStart}px`,
+        width: '1px',
+        height: `${crossSize}px`
+      });
+    } else {
+      Object.assign(line.style, {
+        left: `${crossStart}px`,
+        top: `${position}px`,
+        width: `${crossSize}px`,
+        height: '1px'
+      });
+    }
+
+    return line;
+  }
+
+  function appendTrackLines(documentRef, outline, geometry) {
+    for (const segment of geometry.columns) {
+      outline.appendChild(
+        createTrackLine(
+          documentRef,
+          'column',
+          geometry.content.left + segment.start,
+          geometry.content.top,
+          geometry.content.height,
+          'start'
+        )
+      );
+      outline.appendChild(
+        createTrackLine(
+          documentRef,
+          'column',
+          geometry.content.left + segment.end,
+          geometry.content.top,
+          geometry.content.height,
+          'end'
+        )
+      );
+    }
+
+    for (const segment of geometry.rows) {
+      outline.appendChild(
+        createTrackLine(
+          documentRef,
+          'row',
+          geometry.content.top + segment.start,
+          geometry.content.left,
+          geometry.content.width,
+          'start'
+        )
+      );
+      outline.appendChild(
+        createTrackLine(
+          documentRef,
+          'row',
+          geometry.content.top + segment.end,
+          geometry.content.left,
+          geometry.content.width,
+          'end'
+        )
+      );
+    }
+  }
+
+  function createGridOutline(documentRef, rect, index, geometry) {
     const outline = documentRef.createElement('div');
     outline.setAttribute('data-tsuga-grid-overlay', 'true');
 
@@ -109,7 +331,7 @@
       height: `${rect.height}px`,
       boxSizing: 'border-box',
       border: '2px solid rgba(37, 99, 235, 0.95)',
-      background: 'rgba(37, 99, 235, 0.08)',
+      background: 'rgba(37, 99, 235, 0.04)',
       pointerEvents: 'none'
     });
 
@@ -131,6 +353,7 @@
     });
 
     outline.appendChild(label);
+    appendTrackLines(documentRef, outline, geometry);
     return outline;
   }
 
@@ -299,7 +522,9 @@
         if (!rect || rect.width <= 0 || rect.height <= 0) {
           return;
         }
-        overlayRoot.appendChild(createGridOutline(documentRef, rect, index));
+        const style = getComputedStyleRef(grid);
+        const geometry = getGridTrackGeometry(grid, style, rect);
+        overlayRoot.appendChild(createGridOutline(documentRef, rect, index, geometry));
       });
 
       overlayBadge.textContent = `Grid overlay enabled (${grids.length})`;
@@ -446,6 +671,9 @@
     OVERLAY_BADGE_ID,
     isGridDisplay,
     findGridContainers,
+    parseResolvedTrackSizes,
+    computeTrackSegments,
+    getGridTrackGeometry,
     createInspector
   };
 
