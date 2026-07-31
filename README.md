@@ -19,6 +19,10 @@ This extension toggles a non-invasive visual overlay around CSS grid containers 
 ### Limitations
 
 - Closed shadow roots are not accessible.
+- Subgrid tracks are not exposed as resolved sizes by current browser CSSOM APIs, so subgrid containers receive an outline only.
+- Sideways writing modes and grids under rotated or skewed transforms receive an outline only because their tracks are not axis-aligned.
+- Complex functional gap values beyond pixel, percentage, and simple `calc()` expressions may not be resolved.
+- Track rendering is capped at 2,000 unique edges per grid to protect page responsiveness.
 - Browser-restricted pages (for example, `chrome://` or add-on stores) cannot be inspected.
 - Cross-origin frame access depends on browser extension host permissions and browser policy.
 

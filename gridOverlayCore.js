@@ -3,6 +3,7 @@
 
   const OVERLAY_ROOT_ID = 'tsuga-grid-overlay-root';
   const OVERLAY_BADGE_ID = 'tsuga-grid-overlay-badge';
+  const MAX_TRACK_EDGES_PER_AXIS = 1000;
 
   function isGridDisplay(displayValue) {
     return displayValue === 'grid' || displayValue === 'inline-grid';
@@ -54,9 +55,38 @@
     return grids;
   }
 
-  function parsePixelValue(value) {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
+  function resolveCssLength(value, referenceSize = 0) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized || normalized === 'normal') {
+      return 0;
+    }
+
+    const resolveTerm = (term) => {
+      const match = /^([+-]?(?:\d+|\d*\.\d+))(px|%)$/.exec(term);
+      if (!match) {
+        return null;
+      }
+      const amount = Number.parseFloat(match[1]);
+      return match[2] === '%' ? (amount / 100) * referenceSize : amount;
+    };
+
+    const directValue = resolveTerm(normalized);
+    if (directValue !== null) {
+      return directValue;
+    }
+
+    if (normalized.startsWith('calc(') && normalized.endsWith(')')) {
+      const expression = normalized.slice(5, -1).replace(/\s+/g, '');
+      const terms = expression.match(/[+-]?(?:\d+|\d*\.\d+)(?:px|%)/g);
+      if (terms && terms.join('') === expression) {
+        const resolvedTerms = terms.map(resolveTerm);
+        if (resolvedTerms.every((term) => term !== null)) {
+          return resolvedTerms.reduce((sum, term) => sum + term, 0);
+        }
+      }
+    }
+
+    return 0;
   }
 
   function parseResolvedTrackSizes(value) {
@@ -99,59 +129,172 @@
       .map((current) => Math.max(0, Number.parseFloat(current)));
   }
 
-  function normalizeAlignment(value) {
+  function parseAlignment(value) {
     const parts = String(value || 'start')
       .trim()
-      .split(/\s+/)
-      .filter((part) => part !== 'safe' && part !== 'unsafe');
-    const alignment = parts.at(-1) || 'start';
-    return alignment === 'normal' || alignment === 'stretch' ? 'start' : alignment;
+      .split(/\s+/);
+    const safety = parts.find((part) => part === 'safe' || part === 'unsafe') || null;
+    const rawKeyword = parts.find((part) => part !== 'safe' && part !== 'unsafe') || 'start';
+    const keyword = rawKeyword === 'normal' || rawKeyword === 'stretch' || rawKeyword === 'flex-start'
+      ? 'start'
+      : rawKeyword === 'flex-end'
+        ? 'end'
+        : rawKeyword;
+    return { keyword, safety };
   }
 
-  function computeTrackSegments(trackSizes, gap, availableSize, alignment) {
+  function mapPhysicalAlignment(value, physicalAxis, reverse) {
+    const { keyword, safety } = parseAlignment(value);
+    let mappedKeyword = keyword;
+
+    if (keyword === 'left' || keyword === 'right') {
+      if (physicalAxis !== 'horizontal') {
+        mappedKeyword = 'start';
+      } else if (keyword === 'left') {
+        mappedKeyword = reverse ? 'end' : 'start';
+      } else {
+        mappedKeyword = reverse ? 'start' : 'end';
+      }
+    }
+
+    return safety ? `${safety} ${mappedKeyword}` : mappedKeyword;
+  }
+
+  function collapseAutoFitTracks(trackSizes, shouldCollapse) {
+    if (!shouldCollapse || !trackSizes.some((size) => size === 0)) {
+      return trackSizes;
+    }
+
+    const nonZeroTracks = trackSizes.filter((size) => size > 0);
+    return nonZeroTracks;
+  }
+
+  function computeTrackSegments(trackSizes, gap, availableSize, alignment, options = {}) {
     if (trackSizes.length === 0) {
       return [];
     }
 
     const normalizedGap = Math.max(0, gap);
-    const tracksSize = trackSizes.reduce((sum, size) => sum + size, 0);
-    const baseGapsSize = normalizedGap * Math.max(0, trackSizes.length - 1);
-    const freeSpace = Math.max(0, availableSize - tracksSize - baseGapsSize);
-    const normalizedAlignment = normalizeAlignment(alignment);
+    const activeTrackSizes = collapseAutoFitTracks(
+      trackSizes,
+      options.collapseZeroTracks === true
+    );
+    const tracksSize = activeTrackSizes.reduce((sum, size) => sum + size, 0);
+    const baseGapsSize = normalizedGap * Math.max(0, activeTrackSizes.length - 1);
+    const freeSpace = availableSize - tracksSize - baseGapsSize;
+    const { keyword, safety } = parseAlignment(alignment);
+    const distributableSpace = Math.max(0, freeSpace);
     let offset = 0;
     let distributedGap = 0;
 
-    if (normalizedAlignment === 'center') {
+    if (keyword === 'center' && (freeSpace >= 0 || safety !== 'safe')) {
       offset = freeSpace / 2;
-    } else if (normalizedAlignment === 'end' || normalizedAlignment === 'flex-end') {
+    } else if (keyword === 'end' && (freeSpace >= 0 || safety !== 'safe')) {
       offset = freeSpace;
-    } else if (normalizedAlignment === 'space-between' && trackSizes.length > 1) {
-      distributedGap = freeSpace / (trackSizes.length - 1);
-    } else if (normalizedAlignment === 'space-around') {
-      distributedGap = freeSpace / trackSizes.length;
+    } else if (keyword === 'space-between' && activeTrackSizes.length > 1) {
+      distributedGap = distributableSpace / (activeTrackSizes.length - 1);
+    } else if (keyword === 'space-around') {
+      distributedGap = distributableSpace / activeTrackSizes.length;
       offset = distributedGap / 2;
-    } else if (normalizedAlignment === 'space-evenly') {
-      distributedGap = freeSpace / (trackSizes.length + 1);
+    } else if (keyword === 'space-evenly') {
+      distributedGap = distributableSpace / (activeTrackSizes.length + 1);
       offset = distributedGap;
     }
 
     let position = offset;
-    return trackSizes.map((size) => {
+    return activeTrackSizes.map((size) => {
       const segment = { start: position, end: position + size, size };
       position = segment.end + normalizedGap + distributedGap;
       return segment;
     });
   }
 
-  function getGridTrackGeometry(element, style, rect) {
-    const borderLeft = parsePixelValue(style.borderLeftWidth);
-    const borderRight = parsePixelValue(style.borderRightWidth);
-    const borderTop = parsePixelValue(style.borderTopWidth);
-    const borderBottom = parsePixelValue(style.borderBottomWidth);
-    const paddingLeft = parsePixelValue(style.paddingLeft);
-    const paddingRight = parsePixelValue(style.paddingRight);
-    const paddingTop = parsePixelValue(style.paddingTop);
-    const paddingBottom = parsePixelValue(style.paddingBottom);
+  function projectSegments(segments, extent, reverse) {
+    const projected = segments.map((segment) =>
+      reverse
+        ? { start: extent - segment.end, end: extent - segment.start, size: segment.size }
+        : { ...segment }
+    );
+    return projected.sort((a, b) => a.start - b.start);
+  }
+
+  function getUniqueEdges(segments, offset, scale) {
+    const edges = [];
+    const seen = new Set();
+    for (const segment of segments) {
+      for (const edge of [segment.start, segment.end]) {
+        const position = offset + edge * scale;
+        if (!Number.isFinite(position)) {
+          continue;
+        }
+        const key = position.toFixed(3);
+        if (!seen.has(key)) {
+          seen.add(key);
+          edges.push(position);
+        }
+      }
+    }
+    return edges.sort((a, b) => a - b);
+  }
+
+  function isNonAxisAlignedTransform(style) {
+    const rotate = String(style.rotate || 'none').trim();
+    if (rotate !== 'none' && rotate !== '0deg' && rotate !== '0') {
+      return true;
+    }
+
+    const scale = String(style.scale || 'none').trim();
+    if (scale !== 'none') {
+      const scaleValues = scale.split(/\s+/).map(Number);
+      if (scaleValues.some((value) => Number.isFinite(value) && value < 0)) {
+        return true;
+      }
+    }
+
+    const transform = String(style.transform || 'none').trim();
+    if (transform === 'none') {
+      return false;
+    }
+
+    const matrix = /^matrix\(([^)]+)\)$/.exec(transform);
+    if (matrix) {
+      const values = matrix[1].split(',').map(Number);
+      return values.length !== 6 || values.some((value) => !Number.isFinite(value)) ||
+        values[0] <= 0 || values[3] <= 0 || Math.abs(values[1]) > 0.0001 || Math.abs(values[2]) > 0.0001;
+    }
+
+    return true;
+  }
+
+  function isAutoFitTemplate(element, propertyName, resolvedTrackSizes, gap, availableSize) {
+    const inlineValue = element.style && String(element.style[propertyName] || '');
+    if (inlineValue.includes('auto-fit')) {
+      return true;
+    }
+
+    if (typeof element.computedStyleMap === 'function') {
+      try {
+        const cssName = propertyName === 'gridTemplateColumns' ? 'grid-template-columns' : 'grid-template-rows';
+        return String(element.computedStyleMap().get(cssName) || '').includes('auto-fit');
+      } catch (_error) {
+        // Fall through to the size-based compatibility heuristic.
+      }
+    }
+
+    const fullSize =
+      resolvedTrackSizes.reduce((sum, size) => sum + size, 0) + gap * Math.max(0, resolvedTrackSizes.length - 1);
+    return resolvedTrackSizes.some((size) => size === 0) && fullSize > availableSize + 0.5;
+  }
+
+  function getGridTrackGeometry(element, style, rect, getComputedStyleRef) {
+    const borderLeft = resolveCssLength(style.borderLeftWidth, rect.width);
+    const borderRight = resolveCssLength(style.borderRightWidth, rect.width);
+    const borderTop = resolveCssLength(style.borderTopWidth, rect.height);
+    const borderBottom = resolveCssLength(style.borderBottomWidth, rect.height);
+    const paddingLeft = resolveCssLength(style.paddingLeft, rect.width);
+    const paddingRight = resolveCssLength(style.paddingRight, rect.width);
+    const paddingTop = resolveCssLength(style.paddingTop, rect.width);
+    const paddingBottom = resolveCssLength(style.paddingBottom, rect.width);
     const layoutWidth = Number(element.offsetWidth) || rect.width;
     const layoutHeight = Number(element.offsetHeight) || rect.height;
     const scaleX = layoutWidth > 0 ? rect.width / layoutWidth : 1;
@@ -166,34 +309,89 @@
     );
     const columnSizes = parseResolvedTrackSizes(style.gridTemplateColumns);
     const rowSizes = parseResolvedTrackSizes(style.gridTemplateRows);
+    const writingMode = String(style.writingMode || 'horizontal-tb').toLowerCase();
+    const direction = String(style.direction || 'ltr').toLowerCase();
+    const isVertical = writingMode.startsWith('vertical-');
+    const isSideways = writingMode.startsWith('sideways-');
+    const inlineReverse = direction === 'rtl';
+    const blockReverse = writingMode === 'vertical-rl';
+    let current = element;
+    let nonAxisAlignedTransform = isNonAxisAlignedTransform(style);
+
+    while (!nonAxisAlignedTransform && getComputedStyleRef && current) {
+      current = current.parentElement || current.parentNode || current.host || null;
+      if (current && typeof current.getAttribute === 'function') {
+        nonAxisAlignedTransform = isNonAxisAlignedTransform(getComputedStyleRef(current));
+      }
+    }
+
+    const content = {
+      left: (borderLeft + paddingLeft) * scaleX,
+      top: (borderTop + paddingTop) * scaleY,
+      width: contentWidth * scaleX,
+      height: contentHeight * scaleY
+    };
+
+    if (isSideways || nonAxisAlignedTransform) {
+      return {
+        content,
+        verticalEdges: [],
+        horizontalEdges: [],
+        unsupportedReason: isSideways ? 'sideways-writing-mode' : 'non-axis-aligned-transform',
+        truncated: false
+      };
+    }
+
+    const inlineSize = isVertical ? contentHeight : contentWidth;
+    const blockSize = isVertical ? contentWidth : contentHeight;
+    const columnGap = resolveCssLength(style.columnGap, inlineSize);
+    const rowGap = resolveCssLength(style.rowGap, blockSize);
+    const collapseColumns = isAutoFitTemplate(
+      element,
+      'gridTemplateColumns',
+      columnSizes,
+      columnGap,
+      inlineSize
+    );
+    const collapseRows = isAutoFitTemplate(element, 'gridTemplateRows', rowSizes, rowGap, blockSize);
+    const columnAxis = isVertical ? 'vertical' : 'horizontal';
+    const rowAxis = isVertical ? 'horizontal' : 'vertical';
+    const columns = projectSegments(
+      computeTrackSegments(
+        columnSizes,
+        columnGap,
+        inlineSize,
+        mapPhysicalAlignment(style.justifyContent, columnAxis, inlineReverse),
+        { collapseZeroTracks: collapseColumns }
+      ),
+      inlineSize,
+      inlineReverse
+    );
+    const rows = projectSegments(
+      computeTrackSegments(
+        rowSizes,
+        rowGap,
+        blockSize,
+        mapPhysicalAlignment(style.alignContent, rowAxis, blockReverse),
+        { collapseZeroTracks: collapseRows }
+      ),
+      blockSize,
+      blockReverse
+    );
+
+    const verticalSegments = isVertical ? rows : columns;
+    const horizontalSegments = isVertical ? columns : rows;
+    const verticalEdges = getUniqueEdges(verticalSegments, content.left, scaleX);
+    const horizontalEdges = getUniqueEdges(horizontalSegments, content.top, scaleY);
+    const truncated =
+      verticalEdges.length > MAX_TRACK_EDGES_PER_AXIS || horizontalEdges.length > MAX_TRACK_EDGES_PER_AXIS;
 
     return {
-      content: {
-        left: (borderLeft + paddingLeft) * scaleX,
-        top: (borderTop + paddingTop) * scaleY,
-        width: contentWidth * scaleX,
-        height: contentHeight * scaleY
-      },
-      columns: computeTrackSegments(
-        columnSizes,
-        parsePixelValue(style.columnGap),
-        contentWidth,
-        style.justifyContent
-      ).map((segment) => ({
-        start: segment.start * scaleX,
-        end: segment.end * scaleX,
-        size: segment.size * scaleX
-      })),
-      rows: computeTrackSegments(
-        rowSizes,
-        parsePixelValue(style.rowGap),
-        contentHeight,
-        style.alignContent
-      ).map((segment) => ({
-        start: segment.start * scaleY,
-        end: segment.end * scaleY,
-        size: segment.size * scaleY
-      }))
+      content,
+      verticalEdges: verticalEdges.slice(0, MAX_TRACK_EDGES_PER_AXIS),
+      horizontalEdges: horizontalEdges.slice(0, MAX_TRACK_EDGES_PER_AXIS),
+      unsupportedReason: null,
+      truncated
     };
   }
 
@@ -240,83 +438,55 @@
     return badge;
   }
 
-  function createTrackLine(documentRef, axis, position, crossStart, crossSize, edge) {
-    const line = documentRef.createElement('div');
-    line.setAttribute('data-tsuga-grid-overlay', 'true');
-    line.setAttribute('data-tsuga-grid-axis', axis);
-    line.setAttribute('data-tsuga-grid-edge', edge);
-
-    Object.assign(line.style, {
-      position: 'absolute',
-      pointerEvents: 'none',
-      background: 'rgba(234, 88, 12, 0.95)'
-    });
-
-    if (axis === 'column') {
-      Object.assign(line.style, {
-        left: `${position}px`,
-        top: `${crossStart}px`,
-        width: '1px',
-        height: `${crossSize}px`
-      });
-    } else {
-      Object.assign(line.style, {
-        left: `${crossStart}px`,
-        top: `${position}px`,
-        width: `${crossSize}px`,
-        height: '1px'
-      });
-    }
-
-    return line;
+  function formatSvgCoordinate(value) {
+    return Number(value.toFixed(3));
   }
 
-  function appendTrackLines(documentRef, outline, geometry) {
-    for (const segment of geometry.columns) {
-      outline.appendChild(
-        createTrackLine(
-          documentRef,
-          'column',
-          geometry.content.left + segment.start,
-          geometry.content.top,
-          geometry.content.height,
-          'start'
-        )
-      );
-      outline.appendChild(
-        createTrackLine(
-          documentRef,
-          'column',
-          geometry.content.left + segment.end,
-          geometry.content.top,
-          geometry.content.height,
-          'end'
-        )
-      );
+  function appendTrackGraphic(documentRef, outline, rect, geometry) {
+    if (geometry.verticalEdges.length === 0 && geometry.horizontalEdges.length === 0) {
+      return;
     }
 
-    for (const segment of geometry.rows) {
-      outline.appendChild(
-        createTrackLine(
-          documentRef,
-          'row',
-          geometry.content.top + segment.start,
-          geometry.content.left,
-          geometry.content.width,
-          'start'
-        )
-      );
-      outline.appendChild(
-        createTrackLine(
-          documentRef,
-          'row',
-          geometry.content.top + segment.end,
-          geometry.content.left,
-          geometry.content.width,
-          'end'
-        )
-      );
-    }
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const svg = documentRef.createElementNS(svgNamespace, 'svg');
+    const path = documentRef.createElementNS(svgNamespace, 'path');
+    svg.setAttribute('data-tsuga-grid-overlay', 'true');
+    svg.setAttribute('data-tsuga-grid-tracks', 'true');
+    svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+    svg.setAttribute('width', String(rect.width));
+    svg.setAttribute('height', String(rect.height));
+
+    Object.assign(svg.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: '100%',
+      height: '100%',
+      overflow: 'visible',
+      pointerEvents: 'none'
+    });
+
+    const contentTop = formatSvgCoordinate(geometry.content.top);
+    const contentBottom = formatSvgCoordinate(geometry.content.top + geometry.content.height);
+    const contentLeft = formatSvgCoordinate(geometry.content.left);
+    const contentRight = formatSvgCoordinate(geometry.content.left + geometry.content.width);
+    const commands = [
+      ...geometry.verticalEdges.map(
+        (position) => `M ${formatSvgCoordinate(position)} ${contentTop} V ${contentBottom}`
+      ),
+      ...geometry.horizontalEdges.map(
+        (position) => `M ${contentLeft} ${formatSvgCoordinate(position)} H ${contentRight}`
+      )
+    ];
+
+    path.setAttribute('data-tsuga-grid-overlay', 'true');
+    path.setAttribute('d', commands.join(' '));
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'rgba(234, 88, 12, 0.95)');
+    path.setAttribute('stroke-width', '1');
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(path);
+    outline.appendChild(svg);
   }
 
   function createGridOutline(documentRef, rect, index, geometry) {
@@ -330,13 +500,19 @@
       width: `${rect.width}px`,
       height: `${rect.height}px`,
       boxSizing: 'border-box',
-      border: '2px solid rgba(37, 99, 235, 0.95)',
+      border: '0',
+      outline: '2px solid rgba(37, 99, 235, 0.95)',
       background: 'rgba(37, 99, 235, 0.04)',
       pointerEvents: 'none'
     });
 
     const label = documentRef.createElement('div');
-    label.textContent = `grid ${index + 1}`;
+    const status = geometry.unsupportedReason
+      ? ` · ${geometry.unsupportedReason.replaceAll('-', ' ')}`
+      : geometry.truncated
+        ? ' · track limit reached'
+        : '';
+    label.textContent = `grid ${index + 1}${status}`;
     label.setAttribute('data-tsuga-grid-overlay', 'true');
 
     Object.assign(label.style, {
@@ -353,7 +529,7 @@
     });
 
     outline.appendChild(label);
-    appendTrackLines(documentRef, outline, geometry);
+    appendTrackGraphic(documentRef, outline, rect, geometry);
     return outline;
   }
 
@@ -523,7 +699,7 @@
           return;
         }
         const style = getComputedStyleRef(grid);
-        const geometry = getGridTrackGeometry(grid, style, rect);
+        const geometry = getGridTrackGeometry(grid, style, rect, getComputedStyleRef);
         overlayRoot.appendChild(createGridOutline(documentRef, rect, index, geometry));
       });
 
@@ -671,6 +847,7 @@
     OVERLAY_BADGE_ID,
     isGridDisplay,
     findGridContainers,
+    resolveCssLength,
     parseResolvedTrackSizes,
     computeTrackSegments,
     getGridTrackGeometry,
