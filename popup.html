@@ -3,15 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Grid Overlay</title>
+    <title>Web Utilities</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main>
-      <h1>Grid Overlay</h1>
-      <button id="toggleButton" type="button">Toggle overlay</button>
-      <p id="statusText" role="status" aria-live="polite"></p>
-      <p class="hint">Keyboard: Ctrl+Shift+G (Command+Shift+G on macOS)</p>
+      <h1>Web Utilities</h1>
+
+      <section>
+        <h2>Grid Overlay</h2>
+        <button id="toggleButton" type="button">Toggle overlay</button>
+        <p id="statusText" role="status" aria-live="polite"></p>
+        <p class="hint">Keyboard: Ctrl+Shift+G (Command+Shift+G on macOS)</p>
+      </section>
+
+      <section>
+        <h2>YouTube Music</h2>
+        <button id="autoContinueButton" type="button">Loading…</button>
+        <p id="autoContinueStatus" role="status" aria-live="polite"></p>
+        <p class="hint">Automatically confirms YouTube Music’s “Continue watching?” prompt.</p>
+      </section>
     </main>
     <script src="popup.js"></script>
   </body>

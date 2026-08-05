@@ -17,6 +17,17 @@ h1 {
   font-size: 16px;
 }
 
+section + section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
 button {
   width: 100%;
   padding: 8px 10px;
@@ -29,6 +40,12 @@ button {
 }
 
 #statusText {
+  min-height: 20px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+#autoContinueStatus {
   min-height: 20px;
   margin: 10px 0 0;
   font-size: 13px;

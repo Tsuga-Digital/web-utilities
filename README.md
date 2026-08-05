@@ -1,6 +1,23 @@
 # web-utilities
 
-Browser extension utilities for page inspection.
+Browser extension utilities for page inspection and playback control.
+
+## YouTube Music Auto-Continue utility
+
+The extension automatically confirms YouTube Music’s “Video paused. Continue watching?” prompt and resumes playback when possible.
+
+### Features
+
+- Runs only on `https://music.youtube.com/*`, including the desktop YouTube Music PWA.
+- Enabled by default, with an on/off control in the extension popup.
+- Watches YouTube Music’s dynamic interface without modifying network requests.
+- Uses the prompt’s accessible text and button labels instead of relying on one obfuscated CSS class.
+
+### Limitations
+
+- YouTube can change its prompt markup or wording, which may require selector updates.
+- Browser autoplay policies can still reject a playback resume in some situations.
+- Chrome extensions cannot run inside Chrome on mobile devices.
 
 ## Grid Overlay utility
 
