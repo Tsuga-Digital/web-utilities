@@ -12,6 +12,7 @@ test('recognizes YouTube Music continue prompts', () => {
   assert.equal(utility.isContinuePromptText('Are you still listening?'), true);
   assert.equal(utility.isContinuePromptText('Resume playback?'), true);
   assert.equal(utility.isContinuePromptText('Continue listening?'), true);
+  assert.equal(utility.isContinuePromptText('Still watching? Video will pause soon'), true);
   assert.equal(utility.isContinuePromptText('Continue watching this playlist'), false);
   assert.equal(utility.isContinuePromptText('Video paused'), false);
 });
@@ -258,6 +259,53 @@ test('finds the prompt inside an open application shadow root', () => {
     documentElement: {},
     querySelectorAll(selector) {
       return selector === 'ytmusic-app' ? [app] : [];
+    }
+  };
+
+  const controller = utility.createController({
+    documentRef,
+    windowRef: { setTimeout: (callback) => callback() },
+    MutationObserverRef: null,
+    storageArea: null
+  });
+
+  controller.start();
+
+  assert.equal(clickCount, 1);
+});
+
+test('handles the pre-pause toast variant with a generic anchor action', () => {
+  let clickCount = 0;
+
+  const button = {
+    tagName: 'A',
+    disabled: false,
+    textContent: 'Yes',
+    getAttribute() {
+      return null;
+    },
+    click() {
+      clickCount += 1;
+    }
+  };
+
+  const toast = {
+    tagName: 'TP-YT-PAPER-TOAST',
+    hidden: false,
+    style: {},
+    textContent: 'Still watching? Video will pause soon',
+    getAttribute() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === 'a' ? [button] : [];
+    }
+  };
+
+  const documentRef = {
+    documentElement: {},
+    querySelectorAll(selector) {
+      return selector === 'tp-yt-paper-toast' ? [toast] : [];
     }
   };
 

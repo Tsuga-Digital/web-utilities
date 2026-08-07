@@ -18,7 +18,14 @@
     'ytmusic-popup-container',
     'ytmusic-you-there-renderer',
     '.ytmusic-you-there-renderer',
-    'ytd-popup-container'
+    'ytd-popup-container',
+    'tp-yt-paper-toast',
+    'yt-notification-action-renderer',
+    'ytmusic-notification-action-renderer',
+    'ytm-notification-action-renderer',
+    'yt-toast',
+    '[role="status"]',
+    '[role="alert"]'
   ];
   const BUTTON_SELECTORS = [
     '#confirm-button',
@@ -31,7 +38,8 @@
     'yt-button-shape button',
     'tp-yt-paper-button',
     'yt-button-renderer',
-    'ytmusic-button-renderer'
+    'ytmusic-button-renderer',
+    'a'
   ];
   const SHADOW_HOST_SELECTORS = [
     'ytd-app',
@@ -66,7 +74,7 @@
     }
 
     const asksToContinue = /continue\s+(watching|listening)|resume\s+(playback|watching|listening)|still\s+(watching|listening)/.test(text);
-    const indicatesPause = /video\s+paused|playback\s+paused|\bpaused\b|\bstopped\b/.test(text);
+    const indicatesPause = /video\s+paused|playback\s+paused|\bpaused\b|\bstopped\b|will\s+pause|pause\s+soon|about\s+to\s+pause|pausing\s+soon/.test(text);
     const directContinueQuestion = /are\s+you\s+still\s+(watching|listening)/.test(text);
     const genericContinueQuestion = /\?/.test(text) && /continue\s+(watching|listening)|resume\s+(playback|watching|listening)/.test(text);
     return (asksToContinue && indicatesPause) || directContinueQuestion || genericContinueQuestion;
