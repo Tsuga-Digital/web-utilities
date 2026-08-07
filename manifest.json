@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Web Utilities - Grid Overlay",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Browser utilities for inspecting CSS grids and keeping YouTube Music playback moving.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["<all_urls>"],
