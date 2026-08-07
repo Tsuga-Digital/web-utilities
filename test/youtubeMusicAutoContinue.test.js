@@ -42,9 +42,9 @@ test('clicks a prompt once and attempts to resume paused media', () => {
   const dialog = {
     hidden: false,
     style: {},
-    textContent: 'Video paused. Continue watching?',
-    getAttribute() {
-      return null;
+    textContent: 'Yes',
+    getAttribute(name) {
+      return name === 'dialog-title' ? 'Video paused. Continue watching?' : null;
     },
     querySelectorAll(selector) {
       return selector.includes('button') || selector.includes('role="button"') ? [button] : [];
@@ -89,4 +89,63 @@ test('clicks a prompt once and attempts to resume paused media', () => {
 
   assert.equal(clickCount, 1);
   assert.equal(playCount, 1);
+});
+
+test('polling catches a prompt that appears without a useful mutation', () => {
+  let clickCount = 0;
+  let intervalCallback = null;
+
+  const button = {
+    disabled: false,
+    getAttribute() {
+      return null;
+    },
+    textContent: 'Yes',
+    click() {
+      clickCount += 1;
+    }
+  };
+
+  const dialog = {
+    hidden: true,
+    style: {},
+    textContent: 'Yes',
+    getAttribute(name) {
+      return name === 'dialog-title' ? 'Video paused. Continue watching?' : null;
+    },
+    querySelectorAll(selector) {
+      return selector.includes('button') || selector.includes('role="button"') ? [button] : [];
+    }
+  };
+
+  const documentRef = {
+    documentElement: {},
+    querySelectorAll(selector) {
+      return selector.includes('dialog') || selector.includes('paper-dialog') || selector.includes('confirm-dialog') || selector.includes('ytmusic-') || selector.includes('popup-container')
+        ? [dialog]
+        : [];
+    }
+  };
+
+  const controller = utility.createController({
+    documentRef,
+    windowRef: {
+      setInterval(callback) {
+        intervalCallback = callback;
+        return 1;
+      },
+      clearInterval() {},
+      setTimeout(callback) {
+        callback();
+      }
+    },
+    MutationObserverRef: null,
+    storageArea: null
+  });
+
+  controller.start();
+  dialog.hidden = false;
+  intervalCallback();
+
+  assert.equal(clickCount, 1);
 });

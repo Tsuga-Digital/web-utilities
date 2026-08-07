@@ -1,6 +1,44 @@
 'use strict';
 
 const browserApi = globalThis.browser ?? globalThis.chrome;
+const YOUTUBE_MUSIC_URL_PREFIX = 'https://music.youtube.com/';
+
+function isYoutubeMusicUrl(url) {
+  return typeof url === 'string' && url.startsWith(YOUTUBE_MUSIC_URL_PREFIX);
+}
+
+async function injectYoutubeMusicAutoContinue(tabId) {
+  if (!browserApi.scripting || typeof tabId !== 'number') {
+    return;
+  }
+
+  try {
+    await browserApi.scripting.executeScript({
+      target: { tabId },
+      files: ['youtubeMusicAutoContinue.js']
+    });
+  } catch (_error) {
+    // Restricted or closing tabs can reject injection; the static content script
+    // will handle the next normal page load.
+  }
+}
+
+async function injectIntoOpenYoutubeMusicTabs() {
+  if (!browserApi.tabs?.query) {
+    return;
+  }
+
+  try {
+    const tabs = await browserApi.tabs.query({});
+    await Promise.all(
+      tabs
+        .filter((tab) => isYoutubeMusicUrl(tab.url) && typeof tab.id === 'number')
+        .map((tab) => injectYoutubeMusicAutoContinue(tab.id))
+    );
+  } catch (_error) {
+    // Ignore tab enumeration failures; normal navigation remains covered.
+  }
+}
 
 function isSupportedTabUrl(url) {
   return Boolean(url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://')));
@@ -81,3 +119,19 @@ browserApi.commands.onCommand.addListener((command) => {
     // Ignore command failures; popup flow surfaces detailed errors.
   });
 });
+
+browserApi.runtime.onInstalled?.addListener(() => {
+  void injectIntoOpenYoutubeMusicTabs();
+});
+
+browserApi.runtime.onStartup?.addListener(() => {
+  void injectIntoOpenYoutubeMusicTabs();
+});
+
+browserApi.tabs.onUpdated?.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && isYoutubeMusicUrl(tab.url)) {
+    void injectYoutubeMusicAutoContinue(tabId);
+  }
+});
+
+void injectIntoOpenYoutubeMusicTabs();

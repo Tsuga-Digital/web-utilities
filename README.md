@@ -11,6 +11,7 @@ The extension automatically confirms YouTube Music’s “Video paused. Continue
 - Runs only on `https://music.youtube.com/*`, including the desktop YouTube Music PWA.
 - Enabled by default, with an on/off control in the extension popup.
 - Watches YouTube Music’s dynamic interface without modifying network requests.
+- Re-injects itself into already-open YouTube Music tabs when the extension starts or updates.
 - Uses the prompt’s accessible text and button labels instead of relying on one obfuscated CSS class.
 
 ### Limitations

@@ -1,16 +1,25 @@
 (function (globalScope) {
   'use strict';
 
+  if (globalScope.TsugaYoutubeMusicAutoContinue?.controller) {
+    return;
+  }
+
   const STORAGE_KEY = 'youtubeMusicAutoContinueEnabled';
   const DEFAULT_ENABLED = true;
+  const POLL_INTERVAL_MS = 1000;
+  const CLICK_COOLDOWN_MS = 1500;
   const PROMPT_SELECTORS = [
     '[role="dialog"]',
     'tp-yt-paper-dialog',
+    'paper-dialog',
     'yt-confirm-dialog-renderer',
     'ytmusic-dialog-renderer',
-    'ytmusic-popup-container'
+    'ytmusic-popup-container',
+    'ytd-popup-container'
   ];
   const BUTTON_SELECTORS = [
+    '#confirm-button',
     'button',
     '[role="button"]',
     'tp-yt-paper-button',
@@ -74,6 +83,16 @@
     );
   }
 
+  function getPromptText(element) {
+    return normalizeText([
+      element?.getAttribute?.('dialog-title'),
+      element?.getAttribute?.('aria-label'),
+      element?.getAttribute?.('title'),
+      element?.innerText,
+      element?.textContent
+    ].filter(Boolean).join(' '));
+  }
+
   function isHidden(element) {
     if (!element) {
       return true;
@@ -97,7 +116,7 @@
         }
 
         seen.add(dialog);
-        if (isContinuePromptText(dialog.textContent || dialog.innerText || '')) {
+        if (isContinuePromptText(getPromptText(dialog))) {
           dialogs.push(dialog);
         }
       }
@@ -160,7 +179,8 @@
     let enabled = DEFAULT_ENABLED;
     let observer = null;
     let scanTimer = null;
-    let lastHandledText = new WeakMap();
+    let pollTimer = null;
+    let lastHandled = new WeakMap();
 
     function scan() {
       if (!enabled || !documentRef) {
@@ -169,8 +189,12 @@
 
       let handled = false;
       for (const dialog of findPromptDialogs(documentRef)) {
-        const promptText = normalizeText(dialog.textContent || dialog.innerText || '');
-        if (lastHandledText.get(dialog) === promptText) {
+        const promptText = getPromptText(dialog);
+        const previous = lastHandled.get(dialog);
+        if (
+          previous?.text === promptText &&
+          Date.now() - previous.timestamp < CLICK_COOLDOWN_MS
+        ) {
           continue;
         }
 
@@ -179,7 +203,7 @@
           continue;
         }
 
-        lastHandledText.set(dialog, promptText);
+        lastHandled.set(dialog, { text: promptText, timestamp: Date.now() });
         button.click();
         resumePlayback(documentRef, windowRef);
         handled = true;
@@ -208,25 +232,46 @@
     }
 
     function start() {
-      if (observer || !enabled || !documentRef || typeof MutationObserverRef !== 'function') {
-        scan();
+      if (!enabled || !documentRef) {
         return;
       }
 
-      observer = new MutationObserverRef(queueScan);
-      observer.observe(documentRef.documentElement || documentRef, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['aria-hidden', 'class', 'hidden', 'style']
-      });
+      if (!observer && typeof MutationObserverRef === 'function') {
+        observer = new MutationObserverRef(queueScan);
+        observer.observe(documentRef.documentElement || documentRef, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['aria-hidden', 'class', 'hidden', 'style']
+        });
+      }
+
+      if (pollTimer === null && typeof windowRef?.setInterval === 'function') {
+        pollTimer = windowRef.setInterval(scan, POLL_INTERVAL_MS);
+      }
+
       scan();
     }
 
     function stop() {
       observer?.disconnect?.();
       observer = null;
-      lastHandledText = new WeakMap();
+
+      if (pollTimer !== null && typeof windowRef?.clearInterval === 'function') {
+        windowRef.clearInterval(pollTimer);
+      }
+      pollTimer = null;
+
+      if (scanTimer !== null) {
+        if (typeof windowRef?.cancelAnimationFrame === 'function') {
+          windowRef.cancelAnimationFrame(scanTimer);
+        } else if (typeof windowRef?.clearTimeout === 'function') {
+          windowRef.clearTimeout(scanTimer);
+        }
+        scanTimer = null;
+      }
+
+      lastHandled = new WeakMap();
     }
 
     async function setEnabled(nextEnabled) {
