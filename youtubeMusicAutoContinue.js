@@ -16,15 +16,33 @@
     'yt-confirm-dialog-renderer',
     'ytmusic-dialog-renderer',
     'ytmusic-popup-container',
+    'ytmusic-you-there-renderer',
+    '.ytmusic-you-there-renderer',
     'ytd-popup-container'
   ];
   const BUTTON_SELECTORS = [
     '#confirm-button',
+    '#button',
     'button',
     '[role="button"]',
+    'a#button',
+    'yt-spec-button-shape-next',
+    '.ytSpecButtonShapeNextHost button',
+    'yt-button-shape button',
     'tp-yt-paper-button',
     'yt-button-renderer',
     'ytmusic-button-renderer'
+  ];
+  const SHADOW_HOST_SELECTORS = [
+    'ytd-app',
+    'ytmusic-app',
+    'ytd-popup-container',
+    'ytmusic-popup-container',
+    'yt-confirm-dialog-renderer',
+    'ytmusic-you-there-renderer',
+    'yt-button-renderer',
+    'ytmusic-button-renderer',
+    'yt-button-shape'
   ];
   const AFFIRMATIVE_LABELS = new Set([
     'yes',
@@ -47,19 +65,24 @@
       return false;
     }
 
-    const asksToContinue = /continue watching|resume playback|still watching|still listening/.test(text);
-    const indicatesPause = /video paused|playback paused|paused/.test(text);
-    const directContinueQuestion = /are you still watching|are you still listening/.test(text);
-    return (asksToContinue && indicatesPause) || directContinueQuestion;
+    const asksToContinue = /continue\s+(watching|listening)|resume\s+(playback|watching|listening)|still\s+(watching|listening)/.test(text);
+    const indicatesPause = /video\s+paused|playback\s+paused|\bpaused\b|\bstopped\b/.test(text);
+    const directContinueQuestion = /are\s+you\s+still\s+(watching|listening)/.test(text);
+    const genericContinueQuestion = /\?/.test(text) && /continue\s+(watching|listening)|resume\s+(playback|watching|listening)/.test(text);
+    return (asksToContinue && indicatesPause) || directContinueQuestion || genericContinueQuestion;
   }
 
   function isAffirmativeButtonText(value) {
-    const text = normalizeText(value);
+    const text = normalizeText(value).replace(/[.!?]+$/, '');
     if (!text || /\b(no|cancel|close|dismiss|not now)\b/.test(text)) {
       return false;
     }
 
-    return AFFIRMATIVE_LABELS.has(text);
+    if (AFFIRMATIVE_LABELS.has(text)) {
+      return true;
+    }
+
+    return /^(yes|ok|okay|continue(?: watching| listening)?|resume(?: playback| watching| listening)?)(?:\b|\s)/.test(text);
   }
 
   function queryAll(root, selector) {
@@ -75,12 +98,11 @@
   }
 
   function getElementText(element) {
-    return normalizeText(
-      element?.getAttribute?.('aria-label') ||
-      element?.innerText ||
-      element?.textContent ||
-      ''
-    );
+    return normalizeText([
+      element?.getAttribute?.('aria-label'),
+      element?.innerText,
+      element?.textContent
+    ].filter(Boolean).join(' '));
   }
 
   function getPromptText(element) {
@@ -105,19 +127,53 @@
     return style?.display === 'none' || style?.visibility === 'hidden';
   }
 
+  function isKnownYouTubeMusicPrompt(element) {
+    const tagName = String(element?.tagName || '').toLowerCase();
+    const className = normalizeText(element?.getAttribute?.('class'));
+    return tagName === 'ytmusic-you-there-renderer' || className.split(' ').includes('ytmusic-you-there-renderer');
+  }
+
+  function getSearchRoots(root) {
+    const roots = [root];
+    const seen = new Set(roots);
+
+    const initialShadowRoot = root?.shadowRoot;
+    if (initialShadowRoot && initialShadowRoot.mode !== 'closed') {
+      seen.add(initialShadowRoot);
+      roots.push(initialShadowRoot);
+    }
+
+    for (let index = 0; index < roots.length; index += 1) {
+      const currentRoot = roots[index];
+      for (const selector of SHADOW_HOST_SELECTORS) {
+        for (const host of queryAll(currentRoot, selector)) {
+          const shadowRoot = host.shadowRoot;
+          if (shadowRoot && shadowRoot.mode !== 'closed' && !seen.has(shadowRoot)) {
+            seen.add(shadowRoot);
+            roots.push(shadowRoot);
+          }
+        }
+      }
+    }
+
+    return roots;
+  }
+
   function findPromptDialogs(documentRef) {
     const dialogs = [];
     const seen = new Set();
 
-    for (const selector of PROMPT_SELECTORS) {
-      for (const dialog of queryAll(documentRef, selector)) {
-        if (seen.has(dialog) || isHidden(dialog)) {
-          continue;
-        }
+    for (const root of getSearchRoots(documentRef)) {
+      for (const selector of PROMPT_SELECTORS) {
+        for (const dialog of queryAll(root, selector)) {
+          if (seen.has(dialog) || isHidden(dialog)) {
+            continue;
+          }
 
-        seen.add(dialog);
-        if (isContinuePromptText(getPromptText(dialog))) {
-          dialogs.push(dialog);
+          seen.add(dialog);
+          if (isKnownYouTubeMusicPrompt(dialog) || isContinuePromptText(getPromptText(dialog))) {
+            dialogs.push(dialog);
+          }
         }
       }
     }
@@ -125,19 +181,47 @@
     return dialogs;
   }
 
+  function isClickableElement(element) {
+    const tagName = String(element?.tagName || '').toLowerCase();
+    return tagName === 'a' || tagName === 'button' || element?.getAttribute?.('role') === 'button';
+  }
+
+  function resolveClickable(element) {
+    if (isClickableElement(element)) {
+      return element;
+    }
+
+    for (const root of getSearchRoots(element)) {
+      for (const selector of ['button', 'a', '[role="button"]']) {
+        const clickable = queryAll(root, selector).find((candidate) => !isHidden(candidate));
+        if (clickable) {
+          return clickable;
+        }
+      }
+    }
+
+    return element;
+  }
+
   function findAffirmativeButton(dialog) {
     const candidates = [];
     const seen = new Set();
 
-    for (const selector of BUTTON_SELECTORS) {
-      for (const button of queryAll(dialog, selector)) {
-        if (seen.has(button) || button.disabled || button.getAttribute?.('aria-disabled') === 'true') {
-          continue;
-        }
+    for (const root of getSearchRoots(dialog)) {
+      for (const selector of BUTTON_SELECTORS) {
+        for (const button of queryAll(root, selector)) {
+          if (seen.has(button) || isHidden(button) || button.disabled || button.getAttribute?.('aria-disabled') === 'true') {
+            continue;
+          }
 
-        seen.add(button);
-        if (isAffirmativeButtonText(getElementText(button))) {
-          candidates.push(button);
+          seen.add(button);
+          const isStructuralConfirmButton = selector === '#confirm-button' || selector === '#button';
+          if (isStructuralConfirmButton || isAffirmativeButtonText(getElementText(button))) {
+            const clickable = resolveClickable(button);
+            if (clickable && typeof clickable.click === 'function') {
+              candidates.push(clickable);
+            }
+          }
         }
       }
     }

@@ -10,6 +10,8 @@ test('recognizes YouTube Music continue prompts', () => {
   assert.equal(utility.isContinuePromptText('Video paused. Continue watching?'), true);
   assert.equal(utility.isContinuePromptText('Playback paused — are you still watching?'), true);
   assert.equal(utility.isContinuePromptText('Are you still listening?'), true);
+  assert.equal(utility.isContinuePromptText('Resume playback?'), true);
+  assert.equal(utility.isContinuePromptText('Continue listening?'), true);
   assert.equal(utility.isContinuePromptText('Continue watching this playlist'), false);
   assert.equal(utility.isContinuePromptText('Video paused'), false);
 });
@@ -20,6 +22,9 @@ test('recognizes affirmative prompt buttons without selecting dismissive buttons
   assert.equal(utility.isAffirmativeButtonText('Resume playback'), true);
   assert.equal(utility.isAffirmativeButtonText('No, thanks'), false);
   assert.equal(utility.isAffirmativeButtonText('Cancel'), false);
+  assert.equal(utility.isAffirmativeButtonText('Yes, continue watching'), true);
+  assert.equal(utility.isAffirmativeButtonText('Continue listening'), true);
+  assert.equal(utility.isAffirmativeButtonText('Yes.'), true);
 });
 
 test('clicks a prompt once and attempts to resume paused media', () => {
@@ -146,6 +151,124 @@ test('polling catches a prompt that appears without a useful mutation', () => {
   controller.start();
   dialog.hidden = false;
   intervalCallback();
+
+  assert.equal(clickCount, 1);
+});
+
+test('handles the YouTube Music you-there renderer with a structural button', () => {
+  let clickCount = 0;
+
+  const innerButton = {
+    tagName: 'BUTTON',
+    disabled: false,
+    textContent: 'Ja',
+    getAttribute() {
+      return null;
+    },
+    click() {
+      clickCount += 1;
+    }
+  };
+
+  const buttonWrapper = {
+    tagName: 'YT-BUTTON-SHAPE',
+    getAttribute() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === 'button' ? [innerButton] : [];
+    }
+  };
+
+  const dialog = {
+    tagName: 'YTMUSIC-YOU-THERE-RENDERER',
+    hidden: false,
+    style: {},
+    textContent: 'Ja',
+    getAttribute(name) {
+      return name === 'class' ? 'ytmusic-you-there-renderer' : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '#button') {
+        return [buttonWrapper];
+      }
+      return [];
+    }
+  };
+
+  const documentRef = {
+    documentElement: {},
+    querySelectorAll(selector) {
+      return selector.includes('you-there-renderer') ? [dialog] : [];
+    }
+  };
+
+  const controller = utility.createController({
+    documentRef,
+    windowRef: { setTimeout: (callback) => callback() },
+    MutationObserverRef: null,
+    storageArea: null
+  });
+
+  controller.start();
+
+  assert.equal(clickCount, 1);
+});
+
+test('finds the prompt inside an open application shadow root', () => {
+  let clickCount = 0;
+
+  const button = {
+    tagName: 'BUTTON',
+    disabled: false,
+    textContent: 'Yes',
+    getAttribute() {
+      return null;
+    },
+    click() {
+      clickCount += 1;
+    }
+  };
+
+  const dialog = {
+    tagName: 'YTMUSIC-YOU-THERE-RENDERER',
+    hidden: false,
+    style: {},
+    textContent: 'Video paused. Continue watching?',
+    getAttribute(name) {
+      return name === 'class' ? 'ytmusic-you-there-renderer' : null;
+    },
+    querySelectorAll(selector) {
+      return selector === '#button' ? [button] : [];
+    }
+  };
+
+  const shadowRoot = {
+    mode: 'open',
+    querySelectorAll(selector) {
+      return selector.includes('you-there-renderer') ? [dialog] : [];
+    }
+  };
+
+  const app = {
+    shadowRoot
+  };
+
+  const documentRef = {
+    documentElement: {},
+    querySelectorAll(selector) {
+      return selector === 'ytmusic-app' ? [app] : [];
+    }
+  };
+
+  const controller = utility.createController({
+    documentRef,
+    windowRef: { setTimeout: (callback) => callback() },
+    MutationObserverRef: null,
+    storageArea: null
+  });
+
+  controller.start();
 
   assert.equal(clickCount, 1);
 });
