@@ -9,6 +9,7 @@
   const DEFAULT_ENABLED = true;
   const POLL_INTERVAL_MS = 1000;
   const CLICK_COOLDOWN_MS = 1500;
+  const PLAYBACK_RETRY_DELAYS_MS = [100, 500, 1200];
   const PROMPT_SELECTORS = [
     '[role="dialog"]',
     'tp-yt-paper-dialog',
@@ -237,13 +238,114 @@
     return candidates[0] || null;
   }
 
+  function createEscapeEvent(windowRef, type) {
+    const eventInit = {
+      key: 'Escape',
+      code: 'Escape',
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true
+    };
+
+    if (typeof windowRef?.KeyboardEvent === 'function') {
+      try {
+        return new windowRef.KeyboardEvent(type, eventInit);
+      } catch (_error) {
+        // Fall through to a plain event object for test doubles and unusual hosts.
+      }
+    }
+
+    return { type, ...eventInit };
+  }
+
+  function dispatchEscape(prompt, documentRef, windowRef) {
+    const target = prompt?.dispatchEvent
+      ? prompt
+      : documentRef?.activeElement?.dispatchEvent
+        ? documentRef.activeElement
+        : documentRef?.body?.dispatchEvent
+          ? documentRef.body
+          : documentRef?.dispatchEvent
+            ? documentRef
+            : null;
+
+    if (!target) {
+      return false;
+    }
+
+    try {
+      target.dispatchEvent(createEscapeEvent(windowRef, 'keydown'));
+      target.dispatchEvent(createEscapeEvent(windowRef, 'keyup'));
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function isSafePromptRemovalTarget(prompt) {
+    const tagName = String(prompt?.tagName || '').toLowerCase();
+    return !['ytmusic-popup-container', 'ytd-popup-container'].includes(tagName);
+  }
+
+  function removePrompt(prompt) {
+    if (!prompt || !isSafePromptRemovalTarget(prompt)) {
+      return false;
+    }
+
+    try {
+      if (typeof prompt.remove === 'function') {
+        prompt.remove();
+        return true;
+      }
+
+      if (prompt.parentNode && typeof prompt.parentNode.removeChild === 'function') {
+        prompt.parentNode.removeChild(prompt);
+        return true;
+      }
+    } catch (_error) {
+      // Ignore prompt nodes that YouTube has already detached or replaced.
+    }
+
+    return false;
+  }
+
+  function dismissPrompt(prompt, documentRef, windowRef) {
+    if (isHidden(prompt)) {
+      return;
+    }
+
+    dispatchEscape(prompt, documentRef, windowRef);
+
+    const removeIfStillVisible = () => {
+      if (!isHidden(prompt)) {
+        removePrompt(prompt);
+      }
+    };
+
+    if (typeof windowRef?.setTimeout === 'function') {
+      windowRef.setTimeout(removeIfStillVisible, 100);
+    } else {
+      removeIfStillVisible();
+    }
+  }
+
   function resumePlayback(documentRef, windowRef) {
+    const attempts = new WeakMap();
+
     const resume = () => {
       for (const media of queryAll(documentRef, 'video, audio')) {
-        if (!media.paused || typeof media.play !== 'function') {
+        if (media.ended || !media.paused || typeof media.play !== 'function') {
           continue;
         }
 
+        const attemptCount = attempts.get(media) || 0;
+        if (attemptCount >= PLAYBACK_RETRY_DELAYS_MS.length + 1) {
+          continue;
+        }
+
+        attempts.set(media, attemptCount + 1);
         try {
           const result = media.play();
           result?.catch?.(() => {
@@ -255,10 +357,12 @@
       }
     };
 
+    resume();
+
     if (typeof windowRef?.setTimeout === 'function') {
-      windowRef.setTimeout(resume, 100);
-    } else {
-      resume();
+      for (const delay of PLAYBACK_RETRY_DELAYS_MS) {
+        windowRef.setTimeout(resume, delay);
+      }
     }
   }
 
@@ -273,11 +377,38 @@
     let scanTimer = null;
     let pollTimer = null;
     let lastHandled = new WeakMap();
+    const observedMedia = new Map();
+
+    function watchMedia() {
+      for (const media of queryAll(documentRef, 'video, audio')) {
+        if (observedMedia.has(media) || typeof media.addEventListener !== 'function') {
+          continue;
+        }
+
+        const onPause = () => {
+          if (enabled) {
+            queueScan();
+          }
+        };
+
+        media.addEventListener('pause', onPause);
+        observedMedia.set(media, onPause);
+      }
+    }
+
+    function unwatchMedia() {
+      for (const [media, onPause] of observedMedia) {
+        media.removeEventListener?.('pause', onPause);
+      }
+      observedMedia.clear();
+    }
 
     function scan() {
       if (!enabled || !documentRef) {
         return false;
       }
+
+      watchMedia();
 
       let handled = false;
       for (const dialog of findPromptDialogs(documentRef)) {
@@ -297,6 +428,7 @@
 
         lastHandled.set(dialog, { text: promptText, timestamp: Date.now() });
         button.click();
+        dismissPrompt(dialog, documentRef, windowRef);
         resumePlayback(documentRef, windowRef);
         handled = true;
       }
@@ -348,6 +480,7 @@
     function stop() {
       observer?.disconnect?.();
       observer = null;
+      unwatchMedia();
 
       if (pollTimer !== null && typeof windowRef?.clearInterval === 'function') {
         windowRef.clearInterval(pollTimer);

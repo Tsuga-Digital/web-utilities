@@ -15,6 +15,7 @@ The extension automatically confirms YouTube Music’s “Video paused. Continue
 - Uses the prompt’s accessible text and button labels instead of relying on one obfuscated CSS class.
 - Covers the known YouTube Music `ytmusic-you-there-renderer`/`#button` form and the standard YouTube `yt-confirm-dialog-renderer`/`#confirm-button` form, including nested button-shape wrappers and open shadow roots.
 - Also handles the separate pre-pause toast: “Still watching? Video will pause soon.”
+- Watches media pause events, sends an Escape-style dismissal when needed, removes only the identified prompt as a fallback, and retries playback.
 
 ### Limitations
 

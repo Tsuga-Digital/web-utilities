@@ -97,6 +97,134 @@ test('clicks a prompt once and attempts to resume paused media', () => {
   assert.equal(playCount, 1);
 });
 
+test('dismisses a prompt with Escape and removes it when it remains visible', () => {
+  let escapeCount = 0;
+  let removeCount = 0;
+
+  const button = {
+    disabled: false,
+    getAttribute() {
+      return null;
+    },
+    textContent: 'Yes',
+    click() {}
+  };
+
+  const dialog = {
+    hidden: false,
+    style: {},
+    textContent: 'Video paused. Continue watching?',
+    getAttribute(name) {
+      return name === 'dialog-title' ? 'Video paused. Continue watching?' : null;
+    },
+    dispatchEvent(event) {
+      if (event.key === 'Escape') {
+        escapeCount += 1;
+      }
+    },
+    remove() {
+      removeCount += 1;
+      this.hidden = true;
+    },
+    querySelectorAll(selector) {
+      return selector === '#confirm-button' ? [button] : [];
+    }
+  };
+
+  const documentRef = {
+    documentElement: {},
+    querySelectorAll(selector) {
+      return selector === '[role="dialog"]' ? [dialog] : [];
+    }
+  };
+
+  const controller = utility.createController({
+    documentRef,
+    windowRef: { setTimeout: (callback) => callback() },
+    MutationObserverRef: null,
+    storageArea: null
+  });
+
+  controller.start();
+
+  assert.equal(escapeCount, 2);
+  assert.equal(removeCount, 1);
+});
+
+test('reacts to a media pause event when the prompt appears afterward', () => {
+  let clickCount = 0;
+  let pauseHandler = null;
+  let promptVisible = false;
+
+  const button = {
+    disabled: false,
+    getAttribute() {
+      return null;
+    },
+    textContent: 'Yes',
+    click() {
+      clickCount += 1;
+    }
+  };
+
+  const dialog = {
+    hidden: true,
+    style: {},
+    textContent: 'Video paused. Continue watching?',
+    getAttribute(name) {
+      return name === 'dialog-title' ? 'Video paused. Continue watching?' : null;
+    },
+    querySelectorAll(selector) {
+      return selector === '#confirm-button' ? [button] : [];
+    }
+  };
+
+  const media = {
+    paused: false,
+    addEventListener(type, handler) {
+      if (type === 'pause') {
+        pauseHandler = handler;
+      }
+    },
+    removeEventListener() {},
+    play() {
+      this.paused = false;
+      return Promise.resolve();
+    }
+  };
+
+  const documentRef = {
+    documentElement: {},
+    querySelectorAll(selector) {
+      if (selector === 'video, audio') {
+        return [media];
+      }
+      return selector === '[role="dialog"]' && promptVisible ? [dialog] : [];
+    }
+  };
+
+  const controller = utility.createController({
+    documentRef,
+    windowRef: {
+      setTimeout: (callback) => callback(),
+      setInterval() {
+        return 1;
+      },
+      clearInterval() {}
+    },
+    MutationObserverRef: null,
+    storageArea: null
+  });
+
+  controller.start();
+  promptVisible = true;
+  dialog.hidden = false;
+  media.paused = true;
+  pauseHandler();
+
+  assert.equal(clickCount, 1);
+});
+
 test('polling catches a prompt that appears without a useful mutation', () => {
   let clickCount = 0;
   let intervalCallback = null;
